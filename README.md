@@ -1,54 +1,58 @@
 # Industrial Image Anomaly Detection
 
-## 📋 Descripción del Proyecto
+## Project Description
 
-**Unsupervised Learning for Industrial Image Anomaly Detection** es un proyecto de Deep Learning enfocado en la detección de anomalías en imágenes industriales utilizando técnicas de aprendizaje no supervisado.
+**Unsupervised Learning for Industrial Image Anomaly Detection** is a Deep Learning project focused on detecting anomalies in industrial images using unsupervised learning techniques.
 
-Este proyecto tiene como objetivo entrenar modelos de inteligencia artificial capaces de identificar defectos, irregularidades o anomalías en imágenes de productos o procesos industriales, sin necesidad de contar con ejemplos etiquetados de anomalías durante el entrenamiento.
+This project aims to train artificial intelligence models capable of identifying defects, irregularities, or anomalies in images of industrial products or processes, without the need for labeled examples of anomalies during training.
 
-## 🎯 Objetivo
+## Objective
 
-El objetivo principal es desarrollar un sistema automatizado que pueda:
-- Detectar anomalías visuales en imágenes de producción industrial
-- Identificar defectos o irregularidades sin supervisión humana constante
-- Mejorar el control de calidad en procesos industriales
-- Reducir costos de inspección manual
+The main objective is to develop an automated system that can:
+- Detect visual anomalies in industrial production images
+- Identify defects or irregularities without constant human supervision
+- Improve quality control in industrial processes
+- Reduce manual inspection costs
 
-## 🔍 Características Principales
+## Key Features
 
-- **Aprendizaje No Supervisado**: El modelo aprende patrones normales sin necesidad de ejemplos de anomalías
-- **Deep Learning**: Utiliza redes neuronales profundas para extraer características complejas
-- **Detección Automática**: Identifica automáticamente desviaciones de los patrones normales
-- **Aplicación Industrial**: Diseñado específicamente para entornos de producción industrial
+- **Unsupervised Learning**: The model learns normal patterns without the need for anomaly examples
+- **Deep Learning**: Uses deep neural networks to extract complex features
+- **Automatic Detection**: Automatically identifies deviations from normal patterns
+- **Industrial Application**: Specifically designed for industrial production environments
 
-## 🚀 Casos de Uso
+## Use Cases
 
-- Control de calidad en líneas de producción
-- Detección de defectos en componentes manufacturados
-- Inspección automatizada de productos
-- Monitoreo de procesos industriales
-- Identificación de anomalías en tiempo real
+- Quality control in production lines
+- Defect detection in manufactured components
+- Automated product inspection
+- Industrial process monitoring
+- Real-time anomaly identification
 
-## 📊 Tecnologías
+## Technologies
 
-Este proyecto utiliza técnicas modernas de Deep Learning para el análisis de imágenes:
-- Redes Neuronales Convolucionales (CNN)
+This project will explore modern Deep Learning techniques for image analysis. The specific models and architectures to be investigated are not yet defined and will be determined during the research phase.
+
+Potential approaches may include:
+- Convolutional Neural Networks (CNNs)
 - Autoencoders
-- Modelos de aprendizaje no supervisado
-- Procesamiento de imágenes
+- Variational Autoencoders (VAEs)
+- Generative Adversarial Networks (GANs)
+- Other unsupervised learning models
+- Image processing techniques
 
-## 🤝 Contribuciones
+## Contributions
 
-Las contribuciones son bienvenidas. Si deseas mejorar este proyecto, por favor:
-1. Haz un fork del repositorio
-2. Crea una rama para tu característica
-3. Realiza tus cambios
-4. Envía un pull request
+Contributions are welcome. If you wish to improve this project, please:
+1. Fork the repository
+2. Create a branch for your feature
+3. Make your changes
+4. Submit a pull request
 
-## 📝 Licencia
+## License
 
-Este proyecto está disponible para uso según los términos especificados por el autor.
+This project is available for use according to the terms specified by the author.
 
 ---
 
-**Nota**: Este es un proyecto de investigación y desarrollo en el campo del Deep Learning aplicado a la industria.
+**Note**: This is a research and development project in the field of Deep Learning applied to industry.
