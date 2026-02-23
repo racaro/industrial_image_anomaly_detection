@@ -1,5 +1,5 @@
 """
-src.models – Neural network architectures for anomaly detection.
+src.models - Neural network architectures for anomaly detection.
 
 Subpackages:
     autoencoder     Convolutional Autoencoder
@@ -7,6 +7,6 @@ Subpackages:
 """
 
 from src.models.autoencoder import Autoencoder
-from src.models.gan import Generator, Discriminator
+from src.models.gan import Discriminator, Generator
 
-__all__ = ["Autoencoder", "Generator", "Discriminator"]
+__all__ = ["Autoencoder", "Discriminator", "Generator"]

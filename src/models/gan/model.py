@@ -1,5 +1,5 @@
 """
-GAN-based Anomaly Detection – Generator + Discriminator.
+GAN-based Anomaly Detection - Generator + Discriminator.
 
 The Generator has the same encoder-decoder architecture as the Autoencoder
 so that reconstruction-based anomaly scores are directly comparable.
@@ -13,7 +13,6 @@ Training approach:
     - Anomaly score at test time = MSE(x, G(x))  (same as AE)
 """
 
-import torch
 import torch.nn as nn
 
 
@@ -73,15 +72,12 @@ class Discriminator(nn.Module):
         self.features = nn.Sequential(
             nn.utils.spectral_norm(nn.Conv2d(3, 64, kernel_size=4, stride=2, padding=1)),
             nn.LeakyReLU(0.2, inplace=True),
-
             nn.utils.spectral_norm(nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
-
             nn.utils.spectral_norm(nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)),
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
-
             nn.utils.spectral_norm(nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),

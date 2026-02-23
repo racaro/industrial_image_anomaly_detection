@@ -3,8 +3,8 @@ Convolutional Autoencoder for anomaly detection.
 
 Uses padding=1 on all layers to avoid border artifacts
 and BatchNorm to stabilize training.
-Encoder:  256x256 → 128x128 → 64x64 → 32x32 → 16x16  (latent 256×16×16)
-Decoder:  16x16  → 32x32  → 64x64 → 128x128 → 256x256
+Encoder:  256x256 -> 128x128 -> 64x64 -> 32x32 -> 16x16  (latent 256x16x16)
+Decoder:  16x16  -> 32x32  -> 64x64 -> 128x128 -> 256x256
 """
 
 import torch.nn as nn

@@ -1,5 +1,5 @@
 """
-src.models.autoencoder – Convolutional Autoencoder for anomaly detection.
+src.models.autoencoder - Convolutional Autoencoder for anomaly detection.
 """
 
 from src.models.autoencoder.model import Autoencoder

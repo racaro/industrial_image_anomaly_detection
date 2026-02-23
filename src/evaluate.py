@@ -26,6 +26,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+import matplotlib
 import numpy as np
 import pandas as pd
 import torch
@@ -34,7 +35,6 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 
-import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import (
@@ -46,11 +46,14 @@ from sklearn.metrics import (
     roc_curve,
 )
 
-from src.config import BATCH_SIZE, DATASET_PATH, DEVICE, IMG_HEIGHT, IMG_WIDTH, OUTPUTS_DIR, ensure_dataset
+from src.config import BATCH_SIZE, DATASET_PATH, DEVICE, IMG_HEIGHT, IMG_WIDTH, OUTPUTS_DIR
 from src.dataset import EvalImageDataset, collect_test_images
+from src.logger import get_logger
 from src.metrics import compute_ssim_batch
 from src.models.autoencoder import Autoencoder
 from src.models.gan import Generator
+
+logger = get_logger(__name__)
 
 
 # ──────────────────────────────────────────────
@@ -82,8 +85,7 @@ def load_model(model_name: str) -> tuple:
     weights_path = info["weights"]
     if not os.path.isfile(weights_path):
         raise FileNotFoundError(
-            f"Model weights not found at {weights_path}. "
-            f"Train with: python src/models/{model_name}/train.py"
+            f"Model weights not found at {weights_path}. Train with: python src/models/{model_name}/train.py"
         )
 
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE, weights_only=True))
@@ -100,29 +102,28 @@ def load_model(model_name: str) -> tuple:
 # EVALUATION PIPELINE
 # ──────────────────────────────────────────────
 
+
 def evaluate(model_name: str):
     # --- Load model ---
-    print(f"\n{'='*60}")
-    print(f"  Evaluating: {model_name.upper()}")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("  Evaluating: %s", model_name.upper())
+    logger.info("=" * 60)
 
     model, output_dir = load_model(model_name)
-    print(f"  Model loaded from:  {MODEL_REGISTRY[model_name]['weights']}")
-    print(f"  Results will go to: {output_dir}")
+    logger.info("Model loaded from:  %s", MODEL_REGISTRY[model_name]["weights"])
+    logger.info("Results will go to: %s", output_dir)
 
     # --- Collect test images ---
     records = collect_test_images(DATASET_PATH)
     df_records = pd.DataFrame(records)
-    print(f"\nTest images found: {len(records)}")
-    print(df_records.groupby(["label_name"]).size().to_string())
-    print()
-    print(df_records.groupby(["category", "label_name"]).size().unstack(fill_value=0).to_string())
+    logger.info("Test images found: %d", len(records))
+    logger.info("\n%s", df_records.groupby(["label_name"]).size().to_string())
+    logger.info("\n%s", df_records.groupby(["category", "label_name"]).size().unstack(fill_value=0).to_string())
 
     # --- DataLoader ---
     eval_dataset = EvalImageDataset(records, IMG_HEIGHT, IMG_WIDTH)
     num_workers = 0 if os.name == "nt" else 4
-    eval_loader = DataLoader(eval_dataset, batch_size=BATCH_SIZE, shuffle=False,
-                             num_workers=num_workers)
+    eval_loader = DataLoader(eval_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=num_workers)
 
     # --- Compute reconstruction errors ---
     all_mse = []
@@ -131,7 +132,7 @@ def evaluate(model_name: str):
     all_labels = []
     all_indices = []
 
-    print("\nComputing reconstruction errors...")
+    logger.info("Computing reconstruction errors...")
     with torch.no_grad():
         for imgs, labels, indices in tqdm(eval_loader, desc="  Evaluating", unit="batch"):
             imgs_dev = imgs.to(DEVICE)
@@ -148,15 +149,17 @@ def evaluate(model_name: str):
             all_indices.extend(indices.numpy().tolist())
 
     # --- Results DataFrame ---
-    df_results = pd.DataFrame({
-        "category": [records[i]["category"] for i in all_indices],
-        "label": all_labels,
-        "label_name": [records[i]["label_name"] for i in all_indices],
-        "path": [records[i]["path"] for i in all_indices],
-        "mse": all_mse,
-        "mae": all_mae,
-        "ssim": all_ssim,
-    })
+    df_results = pd.DataFrame(
+        {
+            "category": [records[i]["category"] for i in all_indices],
+            "label": all_labels,
+            "label_name": [records[i]["label_name"] for i in all_indices],
+            "path": [records[i]["path"] for i in all_indices],
+            "mse": all_mse,
+            "mae": all_mae,
+            "ssim": all_ssim,
+        }
+    )
 
     # ── Global metrics ──
     y_true = np.array(all_labels)
@@ -168,27 +171,42 @@ def evaluate(model_name: str):
     ap_mse = average_precision_score(y_true, scores_mse)
     ap_ssim = average_precision_score(y_true, scores_ssim)
 
-    print(f"\n{'='*60}")
-    print(f"  GLOBAL ANOMALY DETECTION METRICS – {model_name.upper()}")
-    print(f"{'='*60}")
-    print(f"  AUROC  (MSE) :  {auroc_mse:.4f}")
-    print(f"  AUROC  (SSIM):  {auroc_ssim:.4f}")
-    print(f"  Avg Precision (MSE) :  {ap_mse:.4f}")
-    print(f"  Avg Precision (SSIM):  {ap_ssim:.4f}")
+    logger.info("=" * 60)
+    logger.info("  GLOBAL ANOMALY DETECTION METRICS - %s", model_name.upper())
+    logger.info("=" * 60)
+    logger.info("AUROC  (MSE) :  %.4f", auroc_mse)
+    logger.info("AUROC  (SSIM):  %.4f", auroc_ssim)
+    logger.info("Avg Precision (MSE) :  %.4f", ap_mse)
+    logger.info("Avg Precision (SSIM):  %.4f", ap_ssim)
 
     # Error statistics by group
-    print(f"\n{'-'*60}")
-    print(f"  Reconstruction Error Statistics")
-    print(f"{'-'*60}")
+    logger.info("-" * 60)
+    logger.info("  Reconstruction Error Statistics")
+    logger.info("-" * 60)
     for label_name in ["good", "anomaly"]:
         subset = df_results[df_results["label_name"] == label_name]
-        print(f"\n  [{label_name.upper()}] ({len(subset)} images)")
-        print(f"    MSE  -> mean: {subset['mse'].mean():.6f}  std: {subset['mse'].std():.6f}  "
-              f"min: {subset['mse'].min():.6f}  max: {subset['mse'].max():.6f}")
-        print(f"    MAE  -> mean: {subset['mae'].mean():.6f}  std: {subset['mae'].std():.6f}  "
-              f"min: {subset['mae'].min():.6f}  max: {subset['mae'].max():.6f}")
-        print(f"    SSIM -> mean: {subset['ssim'].mean():.4f}    std: {subset['ssim'].std():.4f}    "
-              f"min: {subset['ssim'].min():.4f}    max: {subset['ssim'].max():.4f}")
+        logger.info("[%s] (%d images)", label_name.upper(), len(subset))
+        logger.info(
+            "  MSE  -> mean: %.6f  std: %.6f  min: %.6f  max: %.6f",
+            subset["mse"].mean(),
+            subset["mse"].std(),
+            subset["mse"].min(),
+            subset["mse"].max(),
+        )
+        logger.info(
+            "  MAE  -> mean: %.6f  std: %.6f  min: %.6f  max: %.6f",
+            subset["mae"].mean(),
+            subset["mae"].std(),
+            subset["mae"].min(),
+            subset["mae"].max(),
+        )
+        logger.info(
+            "  SSIM -> mean: %.4f    std: %.4f    min: %.4f    max: %.4f",
+            subset["ssim"].mean(),
+            subset["ssim"].std(),
+            subset["ssim"].min(),
+            subset["ssim"].max(),
+        )
 
     # Optimal threshold (Youden's J)
     fpr, tpr, thresholds = roc_curve(y_true, scores_mse)
@@ -197,49 +215,62 @@ def evaluate(model_name: str):
     best_threshold = thresholds[best_idx]
     y_pred = (scores_mse >= best_threshold).astype(int)
 
-    print(f"\n  Optimal MSE threshold (Youden's J): {best_threshold:.6f}")
-    print(f"\n  Classification Report (optimal threshold):")
-    print(classification_report(y_true, y_pred, target_names=["good", "anomaly"]))
+    logger.info("Optimal MSE threshold (Youden's J): %.6f", best_threshold)
+    logger.info(
+        "Classification Report (optimal threshold):\n%s",
+        classification_report(y_true, y_pred, target_names=["good", "anomaly"]),
+    )
 
     cm = confusion_matrix(y_true, y_pred)
-    print(f"  Confusion Matrix:")
-    print(f"    {cm}")
+    logger.info("Confusion Matrix:\n%s", cm)
 
     # ── Per-category metrics ──
-    print(f"\n{'='*60}")
-    print(f"  AUROC PER CATEGORY – {model_name.upper()}")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("  AUROC PER CATEGORY - %s", model_name.upper())
+    logger.info("=" * 60)
     cat_metrics = []
     for cat in sorted(df_results["category"].unique()):
         cat_df = df_results[df_results["category"] == cat]
         if cat_df["label"].nunique() < 2:
-            print(f"  {cat:15s}  Warning: Only one class present, cannot compute AUROC")
+            logger.warning("%s  Warning: Only one class present, cannot compute AUROC", cat)
             continue
         cat_auroc = roc_auc_score(cat_df["label"], cat_df["mse"])
         cat_ap = average_precision_score(cat_df["label"], cat_df["mse"])
         n_good = (cat_df["label"] == 0).sum()
         n_anom = (cat_df["label"] == 1).sum()
-        cat_metrics.append({
-            "Category": cat, "N_Good": n_good, "N_Anomaly": n_anom,
-            "AUROC": cat_auroc, "Avg_Precision": cat_ap,
-        })
-        print(f"  {cat:15s}  AUROC: {cat_auroc:.4f}  AP: {cat_ap:.4f}  "
-              f"(good={n_good}, anomaly={n_anom})")
+        cat_metrics.append(
+            {
+                "Category": cat,
+                "N_Good": n_good,
+                "N_Anomaly": n_anom,
+                "AUROC": cat_auroc,
+                "Avg_Precision": cat_ap,
+            }
+        )
+        logger.info(
+            "%15s  AUROC: %.4f  AP: %.4f  (good=%d, anomaly=%d)",
+            cat,
+            cat_auroc,
+            cat_ap,
+            n_good,
+            n_anom,
+        )
 
     df_cat_metrics = pd.DataFrame(cat_metrics)
 
     # ── Visualizations ──
-    print("\nGenerating visualizations...")
+    logger.info("Generating visualizations...")
 
     # 1. ROC + Precision-Recall curves
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    _fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     axes[0].plot(fpr, tpr, "b-", lw=2, label=f"MSE (AUROC={auroc_mse:.3f})")
     fpr_s, tpr_s, _ = roc_curve(y_true, scores_ssim)
     axes[0].plot(fpr_s, tpr_s, "r--", lw=2, label=f"1-SSIM (AUROC={auroc_ssim:.3f})")
     axes[0].plot([0, 1], [0, 1], "k:", lw=1)
-    axes[0].scatter([fpr[best_idx]], [tpr[best_idx]], c="green", s=100, zorder=5,
-                    label=f"Optimal threshold={best_threshold:.4f}")
+    axes[0].scatter(
+        [fpr[best_idx]], [tpr[best_idx]], c="green", s=100, zorder=5, label=f"Optimal threshold={best_threshold:.4f}"
+    )
     axes[0].set_xlabel("False Positive Rate")
     axes[0].set_ylabel("True Positive Rate")
     axes[0].set_title("ROC Curve")
@@ -256,70 +287,69 @@ def evaluate(model_name: str):
     axes[1].legend(loc="lower left")
     axes[1].grid(True, alpha=0.3)
 
-    plt.suptitle(f"Anomaly Detection Performance – {model_name.upper()}",
-                 fontsize=14, fontweight="bold")
+    plt.suptitle(f"Anomaly Detection Performance - {model_name.upper()}", fontsize=14, fontweight="bold")
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "roc_pr_curves.png"), dpi=150, bbox_inches="tight")
-    print(f"  -> roc_pr_curves.png")
+    logger.info("  -> roc_pr_curves.png")
 
     # 2. MSE error distribution
-    fig, ax = plt.subplots(figsize=(10, 5))
+    _fig, ax = plt.subplots(figsize=(10, 5))
     good_mse = df_results[df_results["label"] == 0]["mse"]
     anom_mse = df_results[df_results["label"] == 1]["mse"]
     ax.hist(good_mse, bins=50, alpha=0.6, label=f"Good (n={len(good_mse)})", color="green")
     ax.hist(anom_mse, bins=50, alpha=0.6, label=f"Anomaly (n={len(anom_mse)})", color="red")
-    ax.axvline(best_threshold, color="black", linestyle="--", lw=2,
-               label=f"Threshold={best_threshold:.4f}")
+    ax.axvline(best_threshold, color="black", linestyle="--", lw=2, label=f"Threshold={best_threshold:.4f}")
     ax.set_xlabel("MSE (Reconstruction Error)")
     ax.set_ylabel("Frequency")
-    ax.set_title(f"Reconstruction Error Distribution – {model_name.upper()}")
+    ax.set_title(f"Reconstruction Error Distribution - {model_name.upper()}")
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "error_distribution.png"), dpi=150, bbox_inches="tight")
-    print(f"  -> error_distribution.png")
+    logger.info("  -> error_distribution.png")
 
     # 3. AUROC per category (bar chart)
     if len(df_cat_metrics) > 0:
-        fig, ax = plt.subplots(figsize=(14, 6))
-        colors = ["green" if v >= 0.8 else "orange" if v >= 0.6 else "red"
-                  for v in df_cat_metrics["AUROC"]]
-        bars = ax.bar(df_cat_metrics["Category"], df_cat_metrics["AUROC"],
-                      color=colors, edgecolor="black")
+        _fig, ax = plt.subplots(figsize=(14, 6))
+        colors = ["green" if v >= 0.8 else "orange" if v >= 0.6 else "red" for v in df_cat_metrics["AUROC"]]
+        bars = ax.bar(df_cat_metrics["Category"], df_cat_metrics["AUROC"], color=colors, edgecolor="black")
         ax.axhline(0.5, color="gray", linestyle=":", lw=1, label="Random (0.5)")
-        ax.axhline(auroc_mse, color="blue", linestyle="--", lw=2,
-                    label=f"Global AUROC={auroc_mse:.3f}")
-        for bar, val in zip(bars, df_cat_metrics["AUROC"]):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                    f"{val:.2f}", ha="center", va="bottom", fontsize=8, fontweight="bold")
+        ax.axhline(auroc_mse, color="blue", linestyle="--", lw=2, label=f"Global AUROC={auroc_mse:.3f}")
+        for bar, val in zip(bars, df_cat_metrics["AUROC"], strict=False):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.01,
+                f"{val:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                fontweight="bold",
+            )
         ax.set_ylabel("AUROC")
-        ax.set_title(f"AUROC per Category – {model_name.upper()}")
+        ax.set_title(f"AUROC per Category - {model_name.upper()}")
         ax.set_ylim(0, 1.1)
         ax.legend()
         plt.xticks(rotation=45, ha="right")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, "auroc_per_category.png"),
-                    dpi=150, bbox_inches="tight")
-        print(f"  -> auroc_per_category.png")
+        plt.savefig(os.path.join(output_dir, "auroc_per_category.png"), dpi=150, bbox_inches="tight")
+        logger.info("  -> auroc_per_category.png")
 
     # 4. Reconstruction samples + error maps
-    print("\nGenerating reconstruction samples...")
+    logger.info("Generating reconstruction samples...")
     n_samples = 8
-    sample_good = df_results[df_results["label"] == 0].sample(
-        n=min(n_samples, len(good_mse)), random_state=42
-    )
-    sample_anom = df_results[df_results["label"] == 1].nlargest(
-        min(n_samples, len(anom_mse)), "mse"
-    )
+    sample_good = df_results[df_results["label"] == 0].sample(n=min(n_samples, len(good_mse)), random_state=42)
+    sample_anom = df_results[df_results["label"] == 1].nlargest(min(n_samples, len(anom_mse)), "mse")
 
-    tf = transforms.Compose([
-        transforms.Resize((IMG_HEIGHT, IMG_WIDTH)),
-        transforms.ToTensor(),
-    ])
+    tf = transforms.Compose(
+        [
+            transforms.Resize((IMG_HEIGHT, IMG_WIDTH)),
+            transforms.ToTensor(),
+        ]
+    )
 
     for group_name, sample_df in [("good", sample_good), ("anomaly", sample_anom)]:
         n = len(sample_df)
-        fig, axes_grid = plt.subplots(3, n, figsize=(3 * n, 9))
+        _fig, axes_grid = plt.subplots(3, n, figsize=(3 * n, 9))
         if n == 1:
             axes_grid = axes_grid.reshape(3, 1)
 
@@ -350,19 +380,17 @@ def evaluate(model_name: str):
         axes_grid[1, 0].set_ylabel("Reconstruction", fontsize=11, fontweight="bold")
         axes_grid[2, 0].set_ylabel("Error Map", fontsize=11, fontweight="bold")
 
-        plt.suptitle(f"Reconstructions – {group_name.upper()} ({model_name.upper()})",
-                     fontsize=14, fontweight="bold")
+        plt.suptitle(f"Reconstructions - {group_name.upper()} ({model_name.upper()})", fontsize=14, fontweight="bold")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"reconstructions_{group_name}.png"),
-                    dpi=150, bbox_inches="tight")
-        print(f"  -> reconstructions_{group_name}.png")
+        plt.savefig(os.path.join(output_dir, f"reconstructions_{group_name}.png"), dpi=150, bbox_inches="tight")
+        logger.info("  -> reconstructions_%s.png", group_name)
 
     # Save CSV
     df_results.to_csv(os.path.join(output_dir, "evaluation_results.csv"), index=False)
     if len(df_cat_metrics) > 0:
         df_cat_metrics.to_csv(os.path.join(output_dir, "metrics_per_category.csv"), index=False)
-    print(f"\n  -> evaluation_results.csv")
-    print(f"  -> metrics_per_category.csv")
+    logger.info("  -> evaluation_results.csv")
+    logger.info("  -> metrics_per_category.csv")
 
     # Save JSON
     good_subset = df_results[df_results["label_name"] == "good"]
@@ -389,7 +417,7 @@ def evaluate(model_name: str):
 
     for group_label, grp_df in [("good", good_subset), ("anomaly", anom_subset)]:
         results_json["error_statistics"][group_label] = {
-            "count": int(len(grp_df)),
+            "count": len(grp_df),
             "mse": {
                 "mean": round(float(grp_df["mse"].mean()), 6),
                 "std": round(float(grp_df["mse"].std()), 6),
@@ -425,9 +453,9 @@ def evaluate(model_name: str):
     json_path = os.path.join(output_dir, "evaluation_results.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(results_json, f, indent=2, ensure_ascii=False)
-    print(f"  -> evaluation_results.json")
+    logger.info("  -> evaluation_results.json")
 
-    print(f"\nAll results saved to: {output_dir}")
+    logger.info("All results saved to: %s", output_dir)
     return df_results, df_cat_metrics
 
 
@@ -435,10 +463,12 @@ def evaluate(model_name: str):
 # CLI
 # ──────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate anomaly detection models.")
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         choices=list(MODEL_REGISTRY.keys()),
         default="autoencoder",
         help="Which model to evaluate (default: autoencoder)",

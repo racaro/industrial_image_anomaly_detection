@@ -22,15 +22,15 @@ combined_dataset.zip
 # ──────────────────────────────────────────────
 # Trained model weights (reproducible via training)
 # ──────────────────────────────────────────────
-outputs/autoencoder/model.pth
-outputs/gan/generator.pth
-outputs/gan/discriminator.pth
+outputs/*/model.pth
+outputs/*/generator.pth
+outputs/*/discriminator.pth
+outputs/*/*.pth
 
 # ──────────────────────────────────────────────
 # Evaluation outputs (reproducible via evaluate.py)
 # ──────────────────────────────────────────────
-outputs/autoencoder/evaluation/
-outputs/gan/evaluation/
+outputs/*/evaluation/
 
 # ──────────────────────────────────────────────
 # Generated figures
@@ -57,6 +57,16 @@ desktop.ini
 # Jupyter
 # ──────────────────────────────────────────────
 .ipynb_checkpoints/
+
+# ──────────────────────────────────────────────
+# Tool caches
+# ──────────────────────────────────────────────
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+.coverage
 
 # ──────────────────────────────────────────────
 # Distribution / packaging
