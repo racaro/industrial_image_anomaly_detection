@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "anomaly-detection-industrial-images"
-version = "0.3.0"
+version = "0.4.0"
 description = "Unsupervised anomaly detection on industrial images using reconstruction-based deep learning models (CAE, GAN, VAE, Diffusion, ViT)."
 readme = "README.md"
 license = {text = "MIT"}

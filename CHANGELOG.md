@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-02-23
+
+### Added
+- `tests/` directory with 53 unit and integration tests:
+  - `tests/conftest.py` — shared fixtures (dummy tensors, temp dataset dirs)
+  - `tests/test_config.py` — paths, device, seed determinism, `ensure_dataset()` logic
+  - `tests/test_metrics.py` — SSIM identity, symmetry, range, shape validation
+  - `tests/test_models.py` — Autoencoder, Generator, Discriminator forward pass shapes and output ranges
+  - `tests/test_dataset.py` — exploration, balancing, path collection, image validation, PyTorch datasets
+  - `tests/test_evaluate.py` — model registry, load_model error paths, AUROC/AP with synthetic data
+
+---
+
 ## [0.3.0] - 2026-02-23
 
 ### Added
