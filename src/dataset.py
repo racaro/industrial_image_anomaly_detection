@@ -8,18 +8,13 @@ from collections import Counter
 
 import pandas as pd
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-from src.config import IMAGE_EXTENSIONS, IMG_HEIGHT, IMG_WIDTH
+from src.config import IMAGE_EXTENSIONS, IMG_HEIGHT, IMG_WIDTH, NUM_WORKERS
 from src.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-# ──────────────────────────────────────────────
-# EXPLORATION
-# ──────────────────────────────────────────────
 
 
 def get_categories(dataset_path: str) -> list[str]:
@@ -80,11 +75,6 @@ def print_distribution_summary(df: pd.DataFrame, title: str = "Image Distributio
     logger.info("  Overall Total:     %d", df["Total Images"].sum())
 
 
-# ──────────────────────────────────────────────
-# BALANCING
-# ──────────────────────────────────────────────
-
-
 def balance_test_good(
     dataset_path: str,
     categories_missing: list[str],
@@ -125,11 +115,6 @@ def balance_test_good(
         logger.info("[%s] Moved %d/%d images.", cat, moved, len(to_move))
 
     logger.info("Balancing completed.")
-
-
-# ──────────────────────────────────────────────
-# IMAGE PATH COLLECTION
-# ──────────────────────────────────────────────
 
 
 def collect_image_paths(
@@ -174,11 +159,6 @@ def collect_test_images(dataset_path: str) -> list[dict]:
                         }
                     )
     return records
-
-
-# ──────────────────────────────────────────────
-# IMAGE VALIDATION
-# ──────────────────────────────────────────────
 
 
 def validate_images(
@@ -242,9 +222,75 @@ def validate_images(
     return valid, df_val
 
 
-# ──────────────────────────────────────────────
-# PYTORCH DATASETS
-# ──────────────────────────────────────────────
+def prepare_training_data(
+    dataset_path: str,
+    batch_size: int,
+    img_h: int = IMG_HEIGHT,
+    img_w: int = IMG_WIDTH,
+    num_images_to_move: int = 100,
+) -> DataLoader:
+    """Prepare training DataLoader with exploration, balancing, and validation.
+
+    This consolidates the boilerplate shared by all training scripts:
+    category discovery → image counting → distribution summary →
+    balancing test/good folders → path collection → image validation →
+    dataset + dataloader creation.
+
+    Args:
+        dataset_path: Root path of the combined dataset.
+        batch_size: Batch size for the DataLoader.
+        img_h: Target image height.
+        img_w: Target image width.
+        num_images_to_move: Images to move from ``train/good`` to ``test/good``
+            for categories that have no ``test/good`` images.
+
+    Returns:
+        A ``DataLoader`` over :class:`AnomalyImageDataset`.
+    """
+    import torch
+
+    categories = get_categories(dataset_path)
+    logger.info("Categories found: %d", len(categories))
+
+    image_counts = count_images(dataset_path, categories)
+    df_distribution = build_distribution_df(image_counts)
+    print_distribution_summary(df_distribution, title="Initial image distribution")
+
+    cats_no_test_good = df_distribution.loc[df_distribution["Test Good"] == 0, "Category"].tolist()
+
+    if cats_no_test_good:
+        logger.info("Categories without test/good: %s", cats_no_test_good)
+        balance_test_good(dataset_path, cats_no_test_good, num_images_to_move)
+
+        image_counts = count_images(dataset_path, categories)
+        df_distribution = build_distribution_df(image_counts)
+        print_distribution_summary(df_distribution, title="Distribution after balancing")
+
+    image_data = collect_image_paths(dataset_path, categories)
+    logger.info("Total train/good images collected: %d", len(image_data))
+    image_data, _ = validate_images(image_data)
+
+    train_dataset = AnomalyImageDataset(image_data, img_h, img_w)
+    use_pin_memory = torch.cuda.is_available()
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=use_pin_memory,
+    )
+
+    if len(train_dataset) > 0:
+        sample, _ = train_dataset[0]
+        logger.info(
+            "Sample - shape: %s, dtype: %s, min: %.2f, max: %.2f",
+            sample.shape,
+            sample.dtype,
+            sample.min(),
+            sample.max(),
+        )
+
+    return train_loader
 
 
 class AnomalyImageDataset(Dataset):

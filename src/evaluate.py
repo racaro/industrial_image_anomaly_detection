@@ -1,18 +1,9 @@
 """
-Unified Evaluation for Anomaly Detection Models
-================================================
-Supports both the Autoencoder and GAN (Generator) models.
+Unified evaluation pipeline for anomaly detection models.
 
-Metrics:
-  - Reconstruction error (MSE, MAE, SSIM) per image
-  - Error distribution: test/good vs test/anomaly
-  - AUROC and Average Precision
-  - Per-category metrics
-  - Visualization: reconstructions + error maps
-
-Usage:
-    python src/evaluate.py --model autoencoder
-    python src/evaluate.py --model gan
+Supports Autoencoder, GAN (Generator), and Diffusion models.
+Computes reconstruction error metrics (MSE, MAE, SSIM, Perceptual),
+AUROC, Average Precision, and generates visualizations.
 """
 
 import argparse
@@ -20,8 +11,7 @@ import json
 import os
 import sys
 
-# Ensure project root is on sys.path so `src.*` and `models.*` imports work
-# regardless of the current working directory.
+# Ensure project root is on sys.path
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -46,30 +36,47 @@ from sklearn.metrics import (
     roc_curve,
 )
 
-from src.config import BATCH_SIZE, DATASET_PATH, DEVICE, IMG_HEIGHT, IMG_WIDTH, OUTPUTS_DIR
+from src.config import BATCH_SIZE, DATASET_PATH, DEVICE, IMG_HEIGHT, IMG_WIDTH, NUM_WORKERS, OUTPUTS_DIR
 from src.dataset import EvalImageDataset, collect_test_images
+from src.feature_extractor import VGGFeatureExtractor, compute_perceptual_score
 from src.logger import get_logger
-from src.metrics import compute_ssim_batch
-from src.models.autoencoder import Autoencoder
+from src.metrics import compute_combined_score, compute_ssim_batch
+from src.models.autoencoder import Autoencoder, AutoencoderV2
+from src.models.diffusion import DiffusionModel
 from src.models.gan import Generator
 
 logger = get_logger(__name__)
 
 
-# ──────────────────────────────────────────────
-# MODEL LOADING
-# ──────────────────────────────────────────────
-
 MODEL_REGISTRY = {
     "autoencoder": {
         "class": Autoencoder,
+        "class_kwargs": {},
         "weights": os.path.join(OUTPUTS_DIR, "autoencoder", "model.pth"),
         "eval_dir": os.path.join(OUTPUTS_DIR, "autoencoder", "evaluation"),
     },
+    "autoencoder_v2": {
+        "class": AutoencoderV2,
+        "class_kwargs": {"bottleneck_channels": 128, "dropout": 0.1},
+        "weights": os.path.join(OUTPUTS_DIR, "autoencoder_v2", "model.pth"),
+        "eval_dir": os.path.join(OUTPUTS_DIR, "autoencoder_v2", "evaluation"),
+    },
     "gan": {
         "class": Generator,
+        "class_kwargs": {},
         "weights": os.path.join(OUTPUTS_DIR, "gan", "generator.pth"),
         "eval_dir": os.path.join(OUTPUTS_DIR, "gan", "evaluation"),
+    },
+    "diffusion": {
+        "class": DiffusionModel,
+        "class_kwargs": {
+            "timesteps": 1000,
+            "schedule": "cosine",
+            "inference_steps": 20,
+            "noise_level": 0.25,
+        },
+        "weights": os.path.join(OUTPUTS_DIR, "diffusion", "model.pth"),
+        "eval_dir": os.path.join(OUTPUTS_DIR, "diffusion", "evaluation"),
     },
 }
 
@@ -80,7 +87,7 @@ def load_model(model_name: str) -> tuple:
         raise ValueError(f"Unknown model '{model_name}'. Choose from: {list(MODEL_REGISTRY)}")
 
     info = MODEL_REGISTRY[model_name]
-    model = info["class"]()
+    model = info["class"](**info.get("class_kwargs", {}))
 
     weights_path = info["weights"]
     if not os.path.isfile(weights_path):
@@ -98,13 +105,7 @@ def load_model(model_name: str) -> tuple:
     return model, eval_dir
 
 
-# ──────────────────────────────────────────────
-# EVALUATION PIPELINE
-# ──────────────────────────────────────────────
-
-
 def evaluate(model_name: str):
-    # --- Load model ---
     logger.info("=" * 60)
     logger.info("  Evaluating: %s", model_name.upper())
     logger.info("=" * 60)
@@ -113,26 +114,28 @@ def evaluate(model_name: str):
     logger.info("Model loaded from:  %s", MODEL_REGISTRY[model_name]["weights"])
     logger.info("Results will go to: %s", output_dir)
 
-    # --- Collect test images ---
     records = collect_test_images(DATASET_PATH)
     df_records = pd.DataFrame(records)
     logger.info("Test images found: %d", len(records))
     logger.info("\n%s", df_records.groupby(["label_name"]).size().to_string())
     logger.info("\n%s", df_records.groupby(["category", "label_name"]).size().unstack(fill_value=0).to_string())
 
-    # --- DataLoader ---
     eval_dataset = EvalImageDataset(records, IMG_HEIGHT, IMG_WIDTH)
-    num_workers = 0 if os.name == "nt" else 4
-    eval_loader = DataLoader(eval_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=num_workers)
+    eval_loader = DataLoader(eval_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 
-    # --- Compute reconstruction errors ---
+    logger.info("Loading VGG-16 feature extractor for perceptual scoring...")
+    vgg_extractor = VGGFeatureExtractor().to(DEVICE)
+    vgg_extractor.eval()
+    logger.info("VGG-16 feature extractor ready.")
+
     all_mse = []
     all_mae = []
     all_ssim = []
+    all_perceptual = []
     all_labels = []
     all_indices = []
 
-    logger.info("Computing reconstruction errors...")
+    logger.info("Computing reconstruction errors (pixel + perceptual)...")
     with torch.no_grad():
         for imgs, labels, indices in tqdm(eval_loader, desc="  Evaluating", unit="batch"):
             imgs_dev = imgs.to(DEVICE)
@@ -141,14 +144,15 @@ def evaluate(model_name: str):
             mse = ((imgs_dev - preds) ** 2).mean(dim=[1, 2, 3]).cpu().numpy()
             mae = (torch.abs(imgs_dev - preds)).mean(dim=[1, 2, 3]).cpu().numpy()
             ssim = compute_ssim_batch(imgs_dev, preds).cpu().numpy()
+            perceptual = compute_perceptual_score(vgg_extractor, imgs_dev, preds).cpu().numpy()
 
             all_mse.extend(mse.tolist())
             all_mae.extend(mae.tolist())
             all_ssim.extend(ssim.tolist())
+            all_perceptual.extend(perceptual.tolist())
             all_labels.extend(labels.numpy().tolist())
             all_indices.extend(indices.numpy().tolist())
 
-    # --- Results DataFrame ---
     df_results = pd.DataFrame(
         {
             "category": [records[i]["category"] for i in all_indices],
@@ -158,26 +162,36 @@ def evaluate(model_name: str):
             "mse": all_mse,
             "mae": all_mae,
             "ssim": all_ssim,
+            "perceptual": all_perceptual,
         }
     )
 
-    # ── Global metrics ──
     y_true = np.array(all_labels)
     scores_mse = np.array(all_mse)
     scores_ssim = 1 - np.array(all_ssim)
+    scores_perceptual = np.array(all_perceptual)
+    scores_combined = compute_combined_score(scores_mse, scores_ssim, scores_perceptual)
 
     auroc_mse = roc_auc_score(y_true, scores_mse)
     auroc_ssim = roc_auc_score(y_true, scores_ssim)
+    auroc_perceptual = roc_auc_score(y_true, scores_perceptual)
+    auroc_combined = roc_auc_score(y_true, scores_combined)
     ap_mse = average_precision_score(y_true, scores_mse)
     ap_ssim = average_precision_score(y_true, scores_ssim)
+    ap_perceptual = average_precision_score(y_true, scores_perceptual)
+    ap_combined = average_precision_score(y_true, scores_combined)
 
     logger.info("=" * 60)
     logger.info("  GLOBAL ANOMALY DETECTION METRICS - %s", model_name.upper())
     logger.info("=" * 60)
-    logger.info("AUROC  (MSE) :  %.4f", auroc_mse)
-    logger.info("AUROC  (SSIM):  %.4f", auroc_ssim)
-    logger.info("Avg Precision (MSE) :  %.4f", ap_mse)
-    logger.info("Avg Precision (SSIM):  %.4f", ap_ssim)
+    logger.info("AUROC  (MSE)       :  %.4f", auroc_mse)
+    logger.info("AUROC  (SSIM)      :  %.4f", auroc_ssim)
+    logger.info("AUROC  (Perceptual):  %.4f", auroc_perceptual)
+    logger.info("AUROC  (Combined)  :  %.4f", auroc_combined)
+    logger.info("Avg Precision (MSE)       :  %.4f", ap_mse)
+    logger.info("Avg Precision (SSIM)      :  %.4f", ap_ssim)
+    logger.info("Avg Precision (Perceptual):  %.4f", ap_perceptual)
+    logger.info("Avg Precision (Combined)  :  %.4f", ap_combined)
 
     # Error statistics by group
     logger.info("-" * 60)
@@ -207,15 +221,21 @@ def evaluate(model_name: str):
             subset["ssim"].min(),
             subset["ssim"].max(),
         )
+        logger.info(
+            "  Perc -> mean: %.6f  std: %.6f  min: %.6f  max: %.6f",
+            subset["perceptual"].mean(),
+            subset["perceptual"].std(),
+            subset["perceptual"].min(),
+            subset["perceptual"].max(),
+        )
 
-    # Optimal threshold (Youden's J)
-    fpr, tpr, thresholds = roc_curve(y_true, scores_mse)
+    fpr, tpr, thresholds = roc_curve(y_true, scores_combined)
     j_scores = tpr - fpr
     best_idx = np.argmax(j_scores)
     best_threshold = thresholds[best_idx]
-    y_pred = (scores_mse >= best_threshold).astype(int)
+    y_pred = (scores_combined >= best_threshold).astype(int)
 
-    logger.info("Optimal MSE threshold (Youden's J): %.6f", best_threshold)
+    logger.info("Optimal Combined threshold (Youden's J): %.6f", best_threshold)
     logger.info(
         "Classification Report (optimal threshold):\n%s",
         classification_report(y_true, y_pred, target_names=["good", "anomaly"]),
@@ -224,18 +244,20 @@ def evaluate(model_name: str):
     cm = confusion_matrix(y_true, y_pred)
     logger.info("Confusion Matrix:\n%s", cm)
 
-    # ── Per-category metrics ──
-    logger.info("=" * 60)
-    logger.info("  AUROC PER CATEGORY - %s", model_name.upper())
-    logger.info("=" * 60)
     cat_metrics = []
     for cat in sorted(df_results["category"].unique()):
         cat_df = df_results[df_results["category"] == cat]
         if cat_df["label"].nunique() < 2:
             logger.warning("%s  Warning: Only one class present, cannot compute AUROC", cat)
             continue
-        cat_auroc = roc_auc_score(cat_df["label"], cat_df["mse"])
-        cat_ap = average_precision_score(cat_df["label"], cat_df["mse"])
+        cat_auroc_mse = roc_auc_score(cat_df["label"], cat_df["mse"])
+        cat_auroc_perc = roc_auc_score(cat_df["label"], cat_df["perceptual"])
+        cat_mse = cat_df["mse"].values
+        cat_ssim_score = 1 - cat_df["ssim"].values
+        cat_perc = cat_df["perceptual"].values
+        cat_combined = compute_combined_score(cat_mse, cat_ssim_score, cat_perc)
+        cat_auroc_combined = roc_auc_score(cat_df["label"], cat_combined)
+        cat_ap = average_precision_score(cat_df["label"], cat_combined)
         n_good = (cat_df["label"] == 0).sum()
         n_anom = (cat_df["label"] == 1).sum()
         cat_metrics.append(
@@ -243,14 +265,17 @@ def evaluate(model_name: str):
                 "Category": cat,
                 "N_Good": n_good,
                 "N_Anomaly": n_anom,
-                "AUROC": cat_auroc,
+                "AUROC": cat_auroc_combined,
+                "AUROC_MSE": cat_auroc_mse,
+                "AUROC_Perceptual": cat_auroc_perc,
                 "Avg_Precision": cat_ap,
             }
         )
         logger.info(
-            "%15s  AUROC: %.4f  AP: %.4f  (good=%d, anomaly=%d)",
+            "%15s  AUROC(comb): %.4f  AUROC(perc): %.4f  AP: %.4f  (good=%d, anom=%d)",
             cat,
-            cat_auroc,
+            cat_auroc_combined,
+            cat_auroc_perc,
             cat_ap,
             n_good,
             n_anom,
@@ -258,15 +283,21 @@ def evaluate(model_name: str):
 
     df_cat_metrics = pd.DataFrame(cat_metrics)
 
-    # ── Visualizations ──
     logger.info("Generating visualizations...")
 
     # 1. ROC + Precision-Recall curves
     _fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-    axes[0].plot(fpr, tpr, "b-", lw=2, label=f"MSE (AUROC={auroc_mse:.3f})")
+    # ROC curves for all scoring methods
+    fpr_m, tpr_m, _ = roc_curve(y_true, scores_mse)
     fpr_s, tpr_s, _ = roc_curve(y_true, scores_ssim)
-    axes[0].plot(fpr_s, tpr_s, "r--", lw=2, label=f"1-SSIM (AUROC={auroc_ssim:.3f})")
+    fpr_p, tpr_p, _ = roc_curve(y_true, scores_perceptual)
+    fpr_c, tpr_c, _ = roc_curve(y_true, scores_combined)
+
+    axes[0].plot(fpr_m, tpr_m, "b-", lw=1.5, label=f"MSE (AUROC={auroc_mse:.3f})")
+    axes[0].plot(fpr_s, tpr_s, "r--", lw=1.5, label=f"1-SSIM (AUROC={auroc_ssim:.3f})")
+    axes[0].plot(fpr_p, tpr_p, "m-.", lw=1.5, label=f"Perceptual (AUROC={auroc_perceptual:.3f})")
+    axes[0].plot(fpr_c, tpr_c, "g-", lw=2.5, label=f"Combined (AUROC={auroc_combined:.3f})")
     axes[0].plot([0, 1], [0, 1], "k:", lw=1)
     axes[0].scatter(
         [fpr[best_idx]], [tpr[best_idx]], c="green", s=100, zorder=5, label=f"Optimal threshold={best_threshold:.4f}"
@@ -274,17 +305,21 @@ def evaluate(model_name: str):
     axes[0].set_xlabel("False Positive Rate")
     axes[0].set_ylabel("True Positive Rate")
     axes[0].set_title("ROC Curve")
-    axes[0].legend(loc="lower right")
+    axes[0].legend(loc="lower right", fontsize=8)
     axes[0].grid(True, alpha=0.3)
 
-    prec, rec, _ = precision_recall_curve(y_true, scores_mse)
+    prec_m, rec_m, _ = precision_recall_curve(y_true, scores_mse)
     prec_s, rec_s, _ = precision_recall_curve(y_true, scores_ssim)
-    axes[1].plot(rec, prec, "b-", lw=2, label=f"MSE (AP={ap_mse:.3f})")
-    axes[1].plot(rec_s, prec_s, "r--", lw=2, label=f"1-SSIM (AP={ap_ssim:.3f})")
+    prec_p, rec_p, _ = precision_recall_curve(y_true, scores_perceptual)
+    prec_c, rec_c, _ = precision_recall_curve(y_true, scores_combined)
+    axes[1].plot(rec_m, prec_m, "b-", lw=1.5, label=f"MSE (AP={ap_mse:.3f})")
+    axes[1].plot(rec_s, prec_s, "r--", lw=1.5, label=f"1-SSIM (AP={ap_ssim:.3f})")
+    axes[1].plot(rec_p, prec_p, "m-.", lw=1.5, label=f"Perceptual (AP={ap_perceptual:.3f})")
+    axes[1].plot(rec_c, prec_c, "g-", lw=2.5, label=f"Combined (AP={ap_combined:.3f})")
     axes[1].set_xlabel("Recall")
     axes[1].set_ylabel("Precision")
     axes[1].set_title("Precision-Recall Curve")
-    axes[1].legend(loc="lower left")
+    axes[1].legend(loc="lower left", fontsize=8)
     axes[1].grid(True, alpha=0.3)
 
     plt.suptitle(f"Anomaly Detection Performance - {model_name.upper()}", fontsize=14, fontweight="bold")
@@ -385,6 +420,8 @@ def evaluate(model_name: str):
         plt.savefig(os.path.join(output_dir, f"reconstructions_{group_name}.png"), dpi=150, bbox_inches="tight")
         logger.info("  -> reconstructions_%s.png", group_name)
 
+    plt.close("all")
+
     # Save CSV
     df_results.to_csv(os.path.join(output_dir, "evaluation_results.csv"), index=False)
     if len(df_cat_metrics) > 0:
@@ -401,9 +438,13 @@ def evaluate(model_name: str):
         "global_metrics": {
             "auroc_mse": round(float(auroc_mse), 4),
             "auroc_ssim": round(float(auroc_ssim), 4),
+            "auroc_perceptual": round(float(auroc_perceptual), 4),
+            "auroc_combined": round(float(auroc_combined), 4),
             "avg_precision_mse": round(float(ap_mse), 4),
             "avg_precision_ssim": round(float(ap_ssim), 4),
-            "optimal_threshold_mse": round(float(best_threshold), 6),
+            "avg_precision_perceptual": round(float(ap_perceptual), 4),
+            "avg_precision_combined": round(float(ap_combined), 4),
+            "optimal_threshold_combined": round(float(best_threshold), 6),
         },
         "confusion_matrix": {
             "true_negatives": int(cm[0, 0]),
@@ -436,6 +477,12 @@ def evaluate(model_name: str):
                 "min": round(float(grp_df["ssim"].min()), 4),
                 "max": round(float(grp_df["ssim"].max()), 4),
             },
+            "perceptual": {
+                "mean": round(float(grp_df["perceptual"].mean()), 6),
+                "std": round(float(grp_df["perceptual"].std()), 6),
+                "min": round(float(grp_df["perceptual"].min()), 6),
+                "max": round(float(grp_df["perceptual"].max()), 6),
+            },
         }
 
     if len(df_cat_metrics) > 0:
@@ -445,6 +492,8 @@ def evaluate(model_name: str):
                 "n_good": int(row["N_Good"]),
                 "n_anomaly": int(row["N_Anomaly"]),
                 "auroc": round(float(row["AUROC"]), 4),
+                "auroc_mse": round(float(row["AUROC_MSE"]), 4),
+                "auroc_perceptual": round(float(row["AUROC_Perceptual"]), 4),
                 "avg_precision": round(float(row["Avg_Precision"]), 4),
             }
             for _, row in df_cat_metrics.iterrows()
@@ -457,11 +506,6 @@ def evaluate(model_name: str):
 
     logger.info("All results saved to: %s", output_dir)
     return df_results, df_cat_metrics
-
-
-# ──────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────
 
 
 def main():

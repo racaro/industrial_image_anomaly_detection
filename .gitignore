@@ -20,22 +20,19 @@ combined_dataset/
 combined_dataset.zip
 
 # ──────────────────────────────────────────────
-# Trained model weights (reproducible via training)
+# Model outputs (weights, logs, evaluations — all reproducible)
 # ──────────────────────────────────────────────
-outputs/*/model.pth
-outputs/*/generator.pth
-outputs/*/discriminator.pth
-outputs/*/*.pth
-
-# ──────────────────────────────────────────────
-# Evaluation outputs (reproducible via evaluate.py)
-# ──────────────────────────────────────────────
-outputs/*/evaluation/
+outputs/
 
 # ──────────────────────────────────────────────
 # Generated figures
 # ──────────────────────────────────────────────
 figures/
+
+# ──────────────────────────────────────────────
+# Documentation (extended docs, local only)
+# ──────────────────────────────────────────────
+docs/
 
 # ──────────────────────────────────────────────
 # IDE / Editor

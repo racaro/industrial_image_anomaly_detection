@@ -8,32 +8,22 @@ import random
 import numpy as np
 import torch
 
-# ──────────────────────────────────────────────
-# PATHS
-# ──────────────────────────────────────────────
-
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATASET_PATH = os.path.join(PROJECT_ROOT, "combined_dataset")
 DATASET_ZIP_PATH = os.path.join(PROJECT_ROOT, "combined_dataset.zip")
 OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
 FIGURES_DIR = os.path.join(PROJECT_ROOT, "figures")
 
-# ──────────────────────────────────────────────
-# IMAGE & TRAINING
-# ──────────────────────────────────────────────
-
 IMG_HEIGHT = 256
 IMG_WIDTH = 256
 BATCH_SIZE = 32
-NUM_EPOCHS = 30
+NUM_EPOCHS = 50
 LEARNING_RATE = 1e-3
 NUM_IMAGES_TO_MOVE = 100  # images to move from train/good → test/good when missing
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".bmp")
 
-# ──────────────────────────────────────────────
-# REPRODUCIBILITY
-# ──────────────────────────────────────────────
+NUM_WORKERS: int = 0 if os.name == "nt" else 4
 
 SEED = 42
 

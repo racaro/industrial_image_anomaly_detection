@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "anomaly-detection-industrial-images"
-version = "0.4.0"
+version = "0.8.3"
 description = "Unsupervised anomaly detection on industrial images using reconstruction-based deep learning models (CAE, GAN, VAE, Diffusion, ViT)."
 readme = "README.md"
 license = {text = "MIT"}
@@ -76,14 +76,32 @@ select = [
     "RUF",   # ruff-specific rules
 ]
 ignore = [
-    "E501",  # line too long (handled by formatter)
+    "E501",   # line too long (handled by formatter)
+    "RUF001", # ambiguous unicode in strings (we use × for logging dimensions)
+    "RUF002", # ambiguous unicode in docstrings (we use × for clarity)
+    "RUF003", # ambiguous unicode in comments (we use × for spatial dimensions)
+    "N806",   # uppercase variable in function (used for local constants like MAX_RESERVOIR)
+    "N812",   # lowercase imported as non-lowercase (torch.nn.functional as F is standard)
+    "SIM108", # ternary operator (multi-line if/else is clearer for tensor device logic)
+    "RUF059", # unpacked variable never used (fig in `fig, ax = plt.subplots()` is idiomatic)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Entry-point scripts use sys.path.insert before imports
 "src/evaluate.py" = ["E402"]
+"src/evaluate_per_category.py" = ["E402"]
+"src/evaluate_patchcore.py" = ["E402"]
+"src/compare_models.py" = ["E402"]
+"src/compare_all_approaches.py" = ["E402"]
+"src/localization.py" = ["E402"]
 "src/models/autoencoder/train.py" = ["E402"]
+"src/models/autoencoder/train_v2.py" = ["E402"]
+"src/models/autoencoder/train_per_category.py" = ["E402"]
 "src/models/gan/train.py" = ["E402"]
+"src/models/diffusion/train.py" = ["E402"]
+"src/models/patchcore/build_memory_bank.py" = ["E402"]
+"src/models/patchcore/enhanced_features.py" = ["E402"]
+"src/models/patchcore/apply_best_configs.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

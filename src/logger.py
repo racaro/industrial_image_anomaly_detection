@@ -1,25 +1,10 @@
-"""
-Centralized logging configuration for the project.
-
-Usage:
-    from src.logger import get_logger
-    logger = get_logger(__name__)
-    logger.info("Training started")
-
-All modules share the same formatting and handlers.
-Console output uses colored level names; file output (when enabled)
-is plain text with timestamps.
-"""
+"""Centralized logging configuration for the project."""
 
 import logging
 import os
 import sys
 
 from src.config import OUTPUTS_DIR
-
-# ──────────────────────────────────────────────
-# FORMAT
-# ──────────────────────────────────────────────
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"

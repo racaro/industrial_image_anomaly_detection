@@ -1,5 +1,5 @@
 """
-Training pipeline for GAN-based Anomaly Detection.
+Training pipeline for GAN-based anomaly detection.
 
 Architecture:
     - Generator (G): Encoder-decoder identical to the Autoencoder
@@ -9,24 +9,17 @@ Training:
     G loss = λ_adv * BCE(D(G(x)), 1) + λ_rec * MSE(x, G(x))
     D loss = BCE(D(x), 1) + BCE(D(G(x)).detach()), 0)
 
-Anomaly score at test time: MSE(x, G(x))  — same as Autoencoder
-for a fair comparison.
-
-Usage:
-    python -m src.models.gan.train
-    python src/models/gan/train.py
+Anomaly score at test time: MSE(x, G(x))
 """
 
 import os
 import sys
 
-# Ensure project root is on sys.path so absolute imports work
-# regardless of the current working directory.
+# Ensure project root is on sys.path
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -36,51 +29,26 @@ from src.config import (
     BATCH_SIZE,
     DATASET_PATH,
     DEVICE,
-    IMG_HEIGHT,
-    IMG_WIDTH,
     NUM_EPOCHS,
-    NUM_IMAGES_TO_MOVE,
     OUTPUTS_DIR,
     ensure_dataset,
     set_seed,
 )
-from src.dataset import (
-    AnomalyImageDataset,
-    balance_test_good,
-    build_distribution_df,
-    collect_image_paths,
-    count_images,
-    get_categories,
-    print_distribution_summary,
-    validate_images,
-)
+from src.dataset import prepare_training_data
 from src.logger import get_logger
 from src.models.gan import Discriminator, Generator
 
 logger = get_logger(__name__)
-
-# ──────────────────────────────────────────────
-# OUTPUT PATHS
-# ──────────────────────────────────────────────
 
 GAN_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "gan")
 os.makedirs(GAN_OUTPUT_DIR, exist_ok=True)
 GENERATOR_SAVE_PATH = os.path.join(GAN_OUTPUT_DIR, "generator.pth")
 DISCRIMINATOR_SAVE_PATH = os.path.join(GAN_OUTPUT_DIR, "discriminator.pth")
 
-# ──────────────────────────────────────────────
-# HYPERPARAMETERS
-# ──────────────────────────────────────────────
-
 LAMBDA_ADV = 1.0  # adversarial loss weight
 LAMBDA_REC = 50.0  # reconstruction loss weight (high → prioritize reconstruction)
 LR_G = 1e-4  # generator learning rate
 LR_D = 1e-4  # discriminator learning rate
-
-
-# ──────────────────────────────────────────────
-# WEIGHT INITIALIZATION
-# ──────────────────────────────────────────────
 
 
 def weights_init(m):
@@ -91,11 +59,6 @@ def weights_init(m):
     elif classname.find("BatchNorm") != -1:
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
-
-
-# ──────────────────────────────────────────────
-# TRAINING LOOP
-# ──────────────────────────────────────────────
 
 
 def train_gan(
@@ -212,67 +175,12 @@ def train_gan(
     return history
 
 
-# ──────────────────────────────────────────────
-# MAIN PIPELINE
-# ──────────────────────────────────────────────
-
-
 def main():
-    # --- Reproducibility ---
     set_seed()
-
-    # --- Ensure dataset is extracted ---
     ensure_dataset()
 
-    # --- Dataset exploration ---
-    logger.info("Loading dataset categories...")
-    categories = get_categories(DATASET_PATH)
-    logger.info("Categories found: %d", len(categories))
+    train_loader = prepare_training_data(DATASET_PATH, BATCH_SIZE)
 
-    image_counts = count_images(DATASET_PATH, categories)
-    df_distribution = build_distribution_df(image_counts)
-    print_distribution_summary(df_distribution, title="Initial image distribution")
-
-    # --- Balancing ---
-    cats_no_test_good = df_distribution.loc[df_distribution["Test Good"] == 0, "Category"].tolist()
-
-    if cats_no_test_good:
-        logger.info("Categories without test/good: %s", cats_no_test_good)
-        balance_test_good(DATASET_PATH, cats_no_test_good, NUM_IMAGES_TO_MOVE)
-
-        image_counts = count_images(DATASET_PATH, categories)
-        df_distribution = build_distribution_df(image_counts)
-        print_distribution_summary(df_distribution, title="Distribution after balancing")
-
-    # --- Collect & validate ---
-    image_data = collect_image_paths(DATASET_PATH, categories)
-    df_images = pd.DataFrame(image_data)
-    logger.info("Total train/good images collected: %d", len(df_images))
-    image_data, _ = validate_images(image_data)
-
-    # --- DataLoader ---
-    train_dataset = AnomalyImageDataset(image_data, IMG_HEIGHT, IMG_WIDTH)
-    num_workers = 0 if os.name == "nt" else 4
-    use_pin_memory = torch.cuda.is_available()
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=use_pin_memory,
-    )
-
-    if len(train_dataset) > 0:
-        sample, _ = train_dataset[0]
-        logger.info(
-            "Sample - shape: %s, dtype: %s, min: %.2f, max: %.2f",
-            sample.shape,
-            sample.dtype,
-            sample.min(),
-            sample.max(),
-        )
-
-    # --- Build models ---
     generator = Generator()
     discriminator = Discriminator()
     generator.apply(weights_init)
@@ -293,7 +201,6 @@ def main():
         lambda_rec=LAMBDA_REC,
     )
 
-    # --- Save models ---
     torch.save(generator.state_dict(), GENERATOR_SAVE_PATH)
     torch.save(discriminator.state_dict(), DISCRIMINATOR_SAVE_PATH)
     logger.info("Generator saved to:     %s", GENERATOR_SAVE_PATH)

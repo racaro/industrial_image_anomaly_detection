@@ -91,7 +91,7 @@ $$L_G = \lambda_{\text{adv}} \cdot \text{BCE}(D(G(x)),\, 1) \;+\; \lambda_{\text
 ## Training
 
 ```bash
-python src/models/gan/train.py
+python -m src.models.gan.train
 ```
 
 Weights are saved to:
@@ -107,10 +107,17 @@ $$\text{score}(x) = \text{MSE}(x,\; G(x))$$
 ## Evaluation
 
 ```bash
-python src/evaluate.py --model gan
+python -m src.evaluate --model gan
 ```
 
 Results (AUROC, AP, visualizations) are saved to `outputs/gan/evaluation/`.
+
+## Module Structure
+
+| File | Description |
+|---|---|
+| `model.py` | Generator (alias for Autoencoder V1) + PatchGAN Discriminator |
+| `train.py` | Adversarial training pipeline with D/G alternating optimization |
 
 ## References
 
