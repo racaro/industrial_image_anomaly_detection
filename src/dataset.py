@@ -7,24 +7,19 @@ import shutil
 from collections import Counter
 
 import pandas as pd
-import torch
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-from src.config import IMAGE_EXTENSIONS, IMG_HEIGHT, IMG_WIDTH
+from src.config import IMAGE_EXTENSIONS, IMG_HEIGHT, IMG_WIDTH, NUM_WORKERS
+from src.logger import get_logger
 
+logger = get_logger(__name__)
 
-# ──────────────────────────────────────────────
-# EXPLORATION
-# ──────────────────────────────────────────────
 
 def get_categories(dataset_path: str) -> list[str]:
     """Return sorted list of categories (subdirectories) in the dataset."""
-    return sorted(
-        d for d in os.listdir(dataset_path)
-        if os.path.isdir(os.path.join(dataset_path, d))
-    )
+    return sorted(d for d in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, d)))
 
 
 def _count_images_in_folder(folder_path: str) -> int:
@@ -32,9 +27,9 @@ def _count_images_in_folder(folder_path: str) -> int:
     if not os.path.isdir(folder_path):
         return 0
     return sum(
-        1 for f in os.listdir(folder_path)
-        if f.lower().endswith(IMAGE_EXTENSIONS)
-        and os.path.isfile(os.path.join(folder_path, f))
+        1
+        for f in os.listdir(folder_path)
+        if f.lower().endswith(IMAGE_EXTENSIONS) and os.path.isfile(os.path.join(folder_path, f))
     )
 
 
@@ -55,32 +50,30 @@ def build_distribution_df(image_counts: dict) -> pd.DataFrame:
     """Build a summary DataFrame of the image distribution."""
     rows = []
     for cat, c in image_counts.items():
-        rows.append({
-            "Category": cat,
-            "Train Good": c["train_good"],
-            "Test Good": c["test_good"],
-            "Test Anomaly": c["test_anomaly"],
-            "Total Images": c["train_good"] + c["test_good"] + c["test_anomaly"],
-        })
+        rows.append(
+            {
+                "Category": cat,
+                "Train Good": c["train_good"],
+                "Test Good": c["test_good"],
+                "Test Anomaly": c["test_anomaly"],
+                "Total Images": c["train_good"] + c["test_good"] + c["test_anomaly"],
+            }
+        )
     df = pd.DataFrame(rows).sort_values("Category").reset_index(drop=True)
     return df
 
 
 def print_distribution_summary(df: pd.DataFrame, title: str = "Image Distribution") -> None:
-    """Print the dataset distribution summary."""
-    print(f"\n{'=' * 60}")
-    print(f"  {title}")
-    print(f"{'=' * 60}")
-    print(df.to_markdown(index=False))
-    print(f"\n  Total Train Good:  {df['Train Good'].sum()}")
-    print(f"  Total Test Good:   {df['Test Good'].sum()}")
-    print(f"  Total Test Anomaly:{df['Test Anomaly'].sum()}")
-    print(f"  Overall Total:     {df['Total Images'].sum()}\n")
+    """Log the dataset distribution summary."""
+    logger.info("=" * 60)
+    logger.info("  %s", title)
+    logger.info("=" * 60)
+    logger.info("\n%s", df.to_markdown(index=False))
+    logger.info("  Total Train Good:  %d", df["Train Good"].sum())
+    logger.info("  Total Test Good:   %d", df["Test Good"].sum())
+    logger.info("  Total Test Anomaly:%d", df["Test Anomaly"].sum())
+    logger.info("  Overall Total:     %d", df["Total Images"].sum())
 
-
-# ──────────────────────────────────────────────
-# BALANCING
-# ──────────────────────────────────────────────
 
 def balance_test_good(
     dataset_path: str,
@@ -91,8 +84,11 @@ def balance_test_good(
     Move `num_to_move` images from train/good → test/good
     for categories that have no test/good images.
     """
-    print(f"\nMoving up to {num_to_move} images from train/good → test/good "
-          f"for {len(categories_missing)} categories without test/good...\n")
+    logger.info(
+        "Moving up to %d images from train/good → test/good for %d categories without test/good...",
+        num_to_move,
+        len(categories_missing),
+    )
 
     for cat in categories_missing:
         src = os.path.join(dataset_path, cat, "train", "good")
@@ -100,12 +96,11 @@ def balance_test_good(
         os.makedirs(dst, exist_ok=True)
 
         if not os.path.isdir(src):
-            print(f"  [{cat}] No train/good folder – skipped.")
+            logger.warning("[%s] No train/good folder - skipped.", cat)
             continue
 
         image_files = [
-            f for f in os.listdir(src)
-            if f.lower().endswith(IMAGE_EXTENSIONS) and os.path.isfile(os.path.join(src, f))
+            f for f in os.listdir(src) if f.lower().endswith(IMAGE_EXTENSIONS) and os.path.isfile(os.path.join(src, f))
         ]
         to_move = image_files[:num_to_move]
 
@@ -115,16 +110,12 @@ def balance_test_good(
                 shutil.move(os.path.join(src, fname), os.path.join(dst, fname))
                 moved += 1
             except Exception as e:
-                print(f"    Error moving {fname}: {e}")
+                logger.error("Error moving %s: %s", fname, e)
 
-        print(f"  [{cat}] Moved {moved}/{len(to_move)} images.")
+        logger.info("[%s] Moved %d/%d images.", cat, moved, len(to_move))
 
-    print("\nBalancing completed.\n")
+    logger.info("Balancing completed.")
 
-
-# ──────────────────────────────────────────────
-# IMAGE PATH COLLECTION
-# ──────────────────────────────────────────────
 
 def collect_image_paths(
     dataset_path: str,
@@ -159,18 +150,16 @@ def collect_test_images(dataset_path: str) -> list[dict]:
             for fname in sorted(os.listdir(folder)):
                 fpath = os.path.join(folder, fname)
                 if fname.lower().endswith(IMAGE_EXTENSIONS) and os.path.isfile(fpath):
-                    records.append({
-                        "category": cat,
-                        "label": label,
-                        "label_name": "good" if label == 0 else "anomaly",
-                        "path": fpath,
-                    })
+                    records.append(
+                        {
+                            "category": cat,
+                            "label": label,
+                            "label_name": "good" if label == 0 else "anomaly",
+                            "path": fpath,
+                        }
+                    )
     return records
 
-
-# ──────────────────────────────────────────────
-# IMAGE VALIDATION
-# ──────────────────────────────────────────────
 
 def validate_images(
     image_data: list[dict],
@@ -188,7 +177,7 @@ def validate_images(
     fmt_counter: Counter = Counter()
     cat_sizes: dict[str, Counter] = {}
 
-    print("\nValidating image integrity...")
+    logger.info("Validating image integrity...")
     for entry in image_data:
         fpath = entry["Image Path"]
         cat = entry["Category"]
@@ -205,37 +194,104 @@ def validate_images(
         except Exception as e:
             broken.append({"Category": cat, "Path": fpath, "Error": str(e)})
 
-    print(f"  Valid images:   {len(valid)}")
-    print(f"  Corrupt images: {len(broken)}")
+    logger.info("Valid images:   %d", len(valid))
+    logger.info("Corrupt images: %d", len(broken))
     if broken:
         for b in broken[:10]:
-            print(f"    [{b['Category']}] {b['Path']}: {b['Error']}")
+            logger.warning("[%s] %s: %s", b["Category"], b["Path"], b["Error"])
 
-    print(f"\n  Color modes:    {dict(mode_counter)}")
-    print(f"  Formats:        {dict(fmt_counter)}")
-    print(f"  Unique sizes:   {len(size_counter)}")
+    logger.info("Color modes:    %s", dict(mode_counter))
+    logger.info("Formats:        %s", dict(fmt_counter))
+    logger.info("Unique sizes:   %d", len(size_counter))
     for (w, h), c in size_counter.most_common():
-        print(f"    {w}x{h}: {c} imgs")
+        logger.info("  %dx%d: %d imgs", w, h, c)
 
     rows = []
     for cat in sorted(cat_sizes):
-        sizes_str = ", ".join(
-            f"{w}x{h}({c})" for (w, h), c in cat_sizes[cat].most_common()
-        )
+        sizes_str = ", ".join(f"{w}x{h}({c})" for (w, h), c in cat_sizes[cat].most_common())
         rows.append({"Category": cat, "Count": sum(cat_sizes[cat].values()), "Sizes": sizes_str})
     df_val = pd.DataFrame(rows)
-    print(f"\n  Detail by category:")
-    print(df_val.to_markdown(index=False))
+    logger.info("Detail by category:\n%s", df_val.to_markdown(index=False))
 
-    print(f"\n  → All images will be resized to {IMG_HEIGHT}x{IMG_WIDTH} "
-          f"and normalized to [0,1] during training.\n")
+    logger.info(
+        "All images will be resized to %dx%d and normalized to [0,1] during training.",
+        IMG_HEIGHT,
+        IMG_WIDTH,
+    )
 
     return valid, df_val
 
 
-# ──────────────────────────────────────────────
-# PYTORCH DATASETS
-# ──────────────────────────────────────────────
+def prepare_training_data(
+    dataset_path: str,
+    batch_size: int,
+    img_h: int = IMG_HEIGHT,
+    img_w: int = IMG_WIDTH,
+    num_images_to_move: int = 100,
+) -> DataLoader:
+    """Prepare training DataLoader with exploration, balancing, and validation.
+
+    This consolidates the boilerplate shared by all training scripts:
+    category discovery → image counting → distribution summary →
+    balancing test/good folders → path collection → image validation →
+    dataset + dataloader creation.
+
+    Args:
+        dataset_path: Root path of the combined dataset.
+        batch_size: Batch size for the DataLoader.
+        img_h: Target image height.
+        img_w: Target image width.
+        num_images_to_move: Images to move from ``train/good`` to ``test/good``
+            for categories that have no ``test/good`` images.
+
+    Returns:
+        A ``DataLoader`` over :class:`AnomalyImageDataset`.
+    """
+    import torch
+
+    categories = get_categories(dataset_path)
+    logger.info("Categories found: %d", len(categories))
+
+    image_counts = count_images(dataset_path, categories)
+    df_distribution = build_distribution_df(image_counts)
+    print_distribution_summary(df_distribution, title="Initial image distribution")
+
+    cats_no_test_good = df_distribution.loc[df_distribution["Test Good"] == 0, "Category"].tolist()
+
+    if cats_no_test_good:
+        logger.info("Categories without test/good: %s", cats_no_test_good)
+        balance_test_good(dataset_path, cats_no_test_good, num_images_to_move)
+
+        image_counts = count_images(dataset_path, categories)
+        df_distribution = build_distribution_df(image_counts)
+        print_distribution_summary(df_distribution, title="Distribution after balancing")
+
+    image_data = collect_image_paths(dataset_path, categories)
+    logger.info("Total train/good images collected: %d", len(image_data))
+    image_data, _ = validate_images(image_data)
+
+    train_dataset = AnomalyImageDataset(image_data, img_h, img_w)
+    use_pin_memory = torch.cuda.is_available()
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=use_pin_memory,
+    )
+
+    if len(train_dataset) > 0:
+        sample, _ = train_dataset[0]
+        logger.info(
+            "Sample - shape: %s, dtype: %s, min: %.2f, max: %.2f",
+            sample.shape,
+            sample.dtype,
+            sample.min(),
+            sample.max(),
+        )
+
+    return train_loader
+
 
 class AnomalyImageDataset(Dataset):
     """
@@ -246,10 +302,12 @@ class AnomalyImageDataset(Dataset):
 
     def __init__(self, image_data: list[dict], img_h: int, img_w: int):
         self.image_data = image_data
-        self.transform = transforms.Compose([
-            transforms.Resize((img_h, img_w)),
-            transforms.ToTensor(),
-        ])
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize((img_h, img_w)),
+                transforms.ToTensor(),
+            ]
+        )
 
     def __len__(self) -> int:
         return len(self.image_data)
@@ -266,10 +324,12 @@ class EvalImageDataset(Dataset):
 
     def __init__(self, records: list[dict], img_h: int, img_w: int):
         self.records = records
-        self.transform = transforms.Compose([
-            transforms.Resize((img_h, img_w)),
-            transforms.ToTensor(),
-        ])
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize((img_h, img_w)),
+                transforms.ToTensor(),
+            ]
+        )
 
     def __len__(self):
         return len(self.records)

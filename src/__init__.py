@@ -1,5 +1,5 @@
 """
-src – Source code for anomaly detection on industrial images.
+src - Source code for anomaly detection on industrial images.
 
 Modules:
     config              Paths, hyperparameters, device selection

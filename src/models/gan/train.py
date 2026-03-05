@@ -1,5 +1,5 @@
 """
-Training pipeline for GAN-based Anomaly Detection.
+Training pipeline for GAN-based anomaly detection.
 
 Architecture:
     - Generator (G): Encoder-decoder identical to the Autoencoder
@@ -9,64 +9,47 @@ Training:
     G loss = λ_adv * BCE(D(G(x)), 1) + λ_rec * MSE(x, G(x))
     D loss = BCE(D(x), 1) + BCE(D(G(x)).detach()), 0)
 
-Anomaly score at test time: MSE(x, G(x))  — same as Autoencoder
-for a fair comparison.
-
-Usage:
-    python -m src.models.gan.train
-    python src/models/gan/train.py
+Anomaly score at test time: MSE(x, G(x))
 """
 
 import os
 import sys
 
-# Ensure project root is on sys.path so absolute imports work
-# regardless of the current working directory.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__)))))
+# Ensure project root is on sys.path
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.config import (
-    BATCH_SIZE, DATASET_PATH, DEVICE, IMG_HEIGHT, IMG_WIDTH,
-    LEARNING_RATE, NUM_EPOCHS, NUM_IMAGES_TO_MOVE, OUTPUTS_DIR,
+    BATCH_SIZE,
+    DATASET_PATH,
+    DEVICE,
+    NUM_EPOCHS,
+    OUTPUTS_DIR,
     ensure_dataset,
+    set_seed,
 )
-from src.dataset import (
-    AnomalyImageDataset, balance_test_good, build_distribution_df,
-    collect_image_paths, count_images, get_categories,
-    print_distribution_summary, validate_images,
-)
-from src.models.gan import Generator, Discriminator
+from src.dataset import prepare_training_data
+from src.logger import get_logger
+from src.models.gan import Discriminator, Generator
 
-# ──────────────────────────────────────────────
-# OUTPUT PATHS
-# ──────────────────────────────────────────────
+logger = get_logger(__name__)
 
 GAN_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "gan")
 os.makedirs(GAN_OUTPUT_DIR, exist_ok=True)
 GENERATOR_SAVE_PATH = os.path.join(GAN_OUTPUT_DIR, "generator.pth")
 DISCRIMINATOR_SAVE_PATH = os.path.join(GAN_OUTPUT_DIR, "discriminator.pth")
 
-# ──────────────────────────────────────────────
-# HYPERPARAMETERS
-# ──────────────────────────────────────────────
+LAMBDA_ADV = 1.0  # adversarial loss weight
+LAMBDA_REC = 50.0  # reconstruction loss weight (high → prioritize reconstruction)
+LR_G = 1e-4  # generator learning rate
+LR_D = 1e-4  # discriminator learning rate
 
-LAMBDA_ADV = 1.0    # adversarial loss weight
-LAMBDA_REC = 50.0   # reconstruction loss weight (high → prioritize reconstruction)
-LR_G = 1e-4         # generator learning rate
-LR_D = 1e-4         # discriminator learning rate
-
-
-# ──────────────────────────────────────────────
-# WEIGHT INITIALIZATION
-# ──────────────────────────────────────────────
 
 def weights_init(m):
     """Apply custom weight initialization (DCGAN convention)."""
@@ -77,10 +60,6 @@ def weights_init(m):
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
 
-
-# ──────────────────────────────────────────────
-# TRAINING LOOP
-# ──────────────────────────────────────────────
 
 def train_gan(
     generator: nn.Module,
@@ -123,8 +102,7 @@ def train_gan(
         run_g_adv = 0.0
         n_samples = 0
 
-        pbar = tqdm(dataloader, desc=f"  Epoch {epoch+1}/{num_epochs}",
-                    unit="batch", leave=True)
+        pbar = tqdm(dataloader, desc=f"  Epoch {epoch + 1}/{num_epochs}", unit="batch", leave=True)
 
         for real_imgs, _ in pbar:
             bs = real_imgs.size(0)
@@ -184,83 +162,49 @@ def train_gan(
         history["g_rec"].append(ep_rec)
         history["g_adv"].append(ep_adv)
 
-        print(f"  Epoch [{epoch+1}/{num_epochs}]  "
-              f"D_loss: {ep_d:.6f}  G_loss: {ep_g:.6f}  "
-              f"Rec: {ep_rec:.6f}  Adv: {ep_adv:.6f}")
+        logger.info(
+            "Epoch [%d/%d]  D_loss: %.6f  G_loss: %.6f  Rec: %.6f  Adv: %.6f",
+            epoch + 1,
+            num_epochs,
+            ep_d,
+            ep_g,
+            ep_rec,
+            ep_adv,
+        )
 
     return history
 
 
-# ──────────────────────────────────────────────
-# MAIN PIPELINE
-# ──────────────────────────────────────────────
-
 def main():
-    # --- Ensure dataset is extracted ---
+    set_seed()
     ensure_dataset()
 
-    # --- Dataset exploration ---
-    print("Loading dataset categories...")
-    categories = get_categories(DATASET_PATH)
-    print(f"  Categories found: {len(categories)}")
+    train_loader = prepare_training_data(DATASET_PATH, BATCH_SIZE)
 
-    image_counts = count_images(DATASET_PATH, categories)
-    df_distribution = build_distribution_df(image_counts)
-    print_distribution_summary(df_distribution, title="Initial image distribution")
-
-    # --- Balancing ---
-    cats_no_test_good = df_distribution.loc[
-        df_distribution["Test Good"] == 0, "Category"
-    ].tolist()
-
-    if cats_no_test_good:
-        print(f"Categories without test/good: {cats_no_test_good}")
-        balance_test_good(DATASET_PATH, cats_no_test_good, NUM_IMAGES_TO_MOVE)
-
-        image_counts = count_images(DATASET_PATH, categories)
-        df_distribution = build_distribution_df(image_counts)
-        print_distribution_summary(df_distribution, title="Distribution after balancing")
-
-    # --- Collect & validate ---
-    image_data = collect_image_paths(DATASET_PATH, categories)
-    df_images = pd.DataFrame(image_data)
-    print(f"Total train/good images collected: {len(df_images)}")
-    image_data, _ = validate_images(image_data)
-
-    # --- DataLoader ---
-    train_dataset = AnomalyImageDataset(image_data, IMG_HEIGHT, IMG_WIDTH)
-    num_workers = 0 if os.name == "nt" else 4
-    use_pin_memory = torch.cuda.is_available()
-    train_loader = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=num_workers, pin_memory=use_pin_memory,
-    )
-
-    if len(train_dataset) > 0:
-        sample, _ = train_dataset[0]
-        print(f"\nSample – shape: {sample.shape}, dtype: {sample.dtype}, "
-              f"min: {sample.min():.2f}, max: {sample.max():.2f}")
-
-    # --- Build models ---
     generator = Generator()
     discriminator = Discriminator()
     generator.apply(weights_init)
     discriminator.apply(weights_init)
 
-    print(f"\nTraining GAN ({NUM_EPOCHS} epochs) on {DEVICE}...")
-    print(f"  λ_adv={LAMBDA_ADV}, λ_rec={LAMBDA_REC}, lr_G={LR_G}, lr_D={LR_D}\n")
+    logger.info("Training GAN (%d epochs) on %s...", NUM_EPOCHS, DEVICE)
+    logger.info("  λ_adv=%.1f, λ_rec=%.1f, lr_G=%.1e, lr_D=%.1e", LAMBDA_ADV, LAMBDA_REC, LR_G, LR_D)
 
     history = train_gan(
-        generator, discriminator, train_loader, DEVICE,
-        num_epochs=NUM_EPOCHS, lr_g=LR_G, lr_d=LR_D,
-        lambda_adv=LAMBDA_ADV, lambda_rec=LAMBDA_REC,
+        generator,
+        discriminator,
+        train_loader,
+        DEVICE,
+        num_epochs=NUM_EPOCHS,
+        lr_g=LR_G,
+        lr_d=LR_D,
+        lambda_adv=LAMBDA_ADV,
+        lambda_rec=LAMBDA_REC,
     )
 
-    # --- Save models ---
     torch.save(generator.state_dict(), GENERATOR_SAVE_PATH)
     torch.save(discriminator.state_dict(), DISCRIMINATOR_SAVE_PATH)
-    print(f"\nGenerator saved to:     {GENERATOR_SAVE_PATH}")
-    print(f"Discriminator saved to: {DISCRIMINATOR_SAVE_PATH}")
+    logger.info("Generator saved to:     %s", GENERATOR_SAVE_PATH)
+    logger.info("Discriminator saved to: %s", DISCRIMINATOR_SAVE_PATH)
 
     return generator, discriminator, history
 

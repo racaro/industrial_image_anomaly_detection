@@ -20,22 +20,21 @@ combined_dataset/
 combined_dataset.zip
 
 # ──────────────────────────────────────────────
-# Trained model weights (reproducible via training)
+# Model outputs (weights, logs, evaluations — all reproducible)
 # ──────────────────────────────────────────────
-outputs/autoencoder/model.pth
-outputs/gan/generator.pth
-outputs/gan/discriminator.pth
-
-# ──────────────────────────────────────────────
-# Evaluation outputs (reproducible via evaluate.py)
-# ──────────────────────────────────────────────
-outputs/autoencoder/evaluation/
-outputs/gan/evaluation/
+outputs/
 
 # ──────────────────────────────────────────────
 # Generated figures
 # ──────────────────────────────────────────────
 figures/
+
+# ──────────────────────────────────────────────
+# Documentation (only RESULTS.md and USAGE.md are versioned)
+# ──────────────────────────────────────────────
+docs/
+!docs/RESULTS.md
+!docs/USAGE.md
 
 # ──────────────────────────────────────────────
 # IDE / Editor
@@ -45,6 +44,12 @@ figures/
 *.swp
 *.swo
 *~
+
+# ──────────────────────────────────────────────
+# GitHub Copilot agents & skills (local only)
+# ──────────────────────────────────────────────
+.github/agents/
+.github/skills/
 
 # ──────────────────────────────────────────────
 # OS
@@ -57,6 +62,16 @@ desktop.ini
 # Jupyter
 # ──────────────────────────────────────────────
 .ipynb_checkpoints/
+
+# ──────────────────────────────────────────────
+# Tool caches
+# ──────────────────────────────────────────────
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+.coverage
 
 # ──────────────────────────────────────────────
 # Distribution / packaging

@@ -1,7 +1,7 @@
 """
-src.models.gan – Generator + PatchGAN Discriminator for anomaly detection.
+src.models.gan - Generator + PatchGAN Discriminator for anomaly detection.
 """
 
-from src.models.gan.model import Generator, Discriminator
+from src.models.gan.model import Discriminator, Generator
 
-__all__ = ["Generator", "Discriminator"]
+__all__ = ["Discriminator", "Generator"]
