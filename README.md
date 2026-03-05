@@ -38,7 +38,7 @@ The `combined_dataset/` directory is built by manually merging two public benchm
 | Benchmark | Categories | Source |
 |---|---|---|
 | **MVTec AD** | 15 (bottle, cable, capsule, carpet, grid, hazelnut, leather, metal_nut, pill, screw, tile, toothbrush, transistor, wood, zipper) | [mvtec.com](https://www.mvtec.com/company/research/datasets/mvtec-ad) |
-| **VisA** | 12 (candle, capsules, cashew, chewinggum, fryum, macaroni1, macaroni2, pcb1, pcb2, pcb3, pcb4, pipe_fryum) | [github.com/amazon-science/spot-diff](https://github.com/amazon-science/spot-diff) |
+| **VisA** | 12 (candle, capsules, cashew, chewinggum, fryum, macaroni1, macaroni2, pcb1, pcb2, pcb3, pcb4, pipe_fryum) | [kaggle.com/ess1004/visa-anomaly-detection](https://www.kaggle.com/datasets/ess1004/visa-anomaly-detection) |
 
 ### Combined Statistics
 
@@ -148,7 +148,7 @@ pip install -r requirements.txt
 
 ### Dataset Preparation
 
-Download [MVTec AD](https://www.mvtec.com/company/research/datasets/mvtec-ad) and [VisA](https://github.com/amazon-science/spot-diff) datasets, then organize them into the `combined_dataset/` structure described [above](#directory-layout). The pipeline auto-detects all categories present in this folder.
+Download [MVTec AD](https://www.mvtec.com/company/research/datasets/mvtec-ad) and [VisA](https://www.kaggle.com/datasets/ess1004/visa-anomaly-detection) datasets, then organize them into the `combined_dataset/` structure described [above](#directory-layout). The pipeline auto-detects all categories present in this folder.
 
 ---
 
