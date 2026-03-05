@@ -198,8 +198,8 @@ anomaly_detection_industrial_images/
 │       ├── diffusion/                # DDPM U-Net
 │       └── patchcore/                # Memory bank + enhanced features
 ├── tests/                            # Unit tests (53 tests)
-├── docs/                             # Extended documentation (git-ignored)
-│   ├── USAGE.md                      # Full command reference & configuration
+├── docs/                             # Extended documentation
+│   ├── USAGE.md                      # Full command reference (git-ignored)
 │   └── RESULTS.md                    # Experimental results & analysis
 ├── requirements.txt
 ├── pyproject.toml
