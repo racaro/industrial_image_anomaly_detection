@@ -94,27 +94,44 @@ Each model README includes architecture diagrams, hyperparameters, design decisi
 
 ### Global Performance Comparison
 
-<p align="center">
-  <img src="assets/comparison_summary.png" alt="Global metrics comparison across all approaches" width="700">
-</p>
+| Model | Approach | AUROC (Combined) | AUROC (MSE) | Mean AUROC/Category | Categories ≥ 0.9 |
+|---|---|---|---|---|---|
+| **Autoencoder V1** | Reconstruction (MSE) | 0.5339 | 0.5397 | 0.627 | 4 |
+| **Autoencoder V2** | Reconstruction (MSE + SSIM) | 0.5245 | 0.5245 | 0.618 | 2 |
+| **GAN** | Adversarial Reconstruction | 0.5148 | 0.5351 | 0.618 | 2 |
+| **Diffusion (DDPM)** | Denoising-based | 0.4835 | 0.4960 | 0.540 | 2 |
+| **Per-Category Autoencoder** | Per-category Reconstruction | — | — | **0.701** | 10 |
+| **PatchCore** | Feature-based (k-NN) | — | — | **0.897** | **22** |
 
-> PatchCore (feature-based) achieves **AUROC = 0.834**, significantly outperforming all reconstruction-based approaches.
+**Key Finding**: PatchCore significantly outperforms all reconstruction-based approaches with **mean AUROC of 0.897**, achieving  AUROC ≥ 0.9 in 22 of 27 categories. Per-category autoencoders (0.701) improve over global models (0.627) by specializing per product type, but remain substantially below feature-based detection.
 
 ### Per-Category AUROC Breakdown
 
-<p align="center">
-  <img src="assets/auroc_per_category.png" alt="AUROC per category across all approaches" width="700">
-</p>
+PatchCore performance across all 27 categories (sorted):
 
-### Anomaly Localization
+| Excellent (≥ 0.95) | Strong (0.85–0.95) | Moderate (0.70–0.85) | Weak (< 0.70) |
+|---|---|---|---|
+| leather (1.00), metal_nut (1.00), hazelnut (0.99), zipper (0.99), bottle (0.98), carpet (0.98), pipe_fryum (0.98), chewinggum (0.97), transistor (0.96), pcb1 (0.95) | fryum (0.96), pcb4 (0.96), tile (0.96), cable (0.91), macaroni1 (0.92), wood (0.98), candle (0.87), capsule (0.86), pill (0.88), toothbrush (0.85) | pcb2 (0.82), pcb3 (0.83), macaroni2 (0.81), capsules (0.79) | grid (0.54), screw (0.64) |
 
-PatchCore produces pixel-level anomaly heatmaps highlighting defective regions:
+### Why Reconstruction Models Failed
 
-<p align="center">
-  <img src="assets/localization_example.png" alt="Anomaly localization heatmap example (bottle)" width="500">
-</p>
+1. **Single global model ≈ random detection**: Training one model on 27 heterogeneous product categories (screws, leather, PCBs, candles) forces learning of overly general representations. Category-level anomalies cancel out to AUROC ≈ 0.5.
 
-For full results, analysis, and discussion, see [docs/RESULTS.md](docs/RESULTS.md).
+2. **Per-category specialization helps (+12% mean AUROC)**: Using 27 independent models — one per product type — substantially improves discrimination, achieving mean AUROC = 0.701. However, still well below PatchCore.
+
+3. **Feature-based approaches superior**: PatchCore's frozen ImageNet backbone and nearest-neighbor search fundamentally outperforms learned reconstruction, likely because:
+   - Pre-trained features capture diverse visual concepts already
+   - No need to learn anomaly patterns (inherently present in defects)
+   - k-NN is robust to category-specific anomaly appearance
+
+### Training Details
+
+- **GPU**: NVIDIA GeForce RTX 4050 Laptop (6 GB VRAM, Ada Lovelace)
+- **Framework**: PyTorch 2.6.0+cu124, Python 3.10+
+- **Dataset**: MVTec AD (15 categories) + VisA (12 categories) = 27 total, 12,050 training images, 3,168 test images
+- **Image size**: 256 × 256 RGB, normalized to [0, 1]
+
+For detailed analysis, experimental progression, and per-category breakdowns, see [docs/RESULTS.md](docs/RESULTS.md).
 
 ---
 
